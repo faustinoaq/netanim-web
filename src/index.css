@@ -1,0 +1,309 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/public-sans/index.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
+/* Dark is opt-in via the header toggle, never the print default. Components
+   read semantic tokens only, so redefining the ground/ink vars re-skins the
+   whole app — including portalled dialogs and selects — without dark: utils. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * SSBCV — "instrumento de banco" visual system.
+ *
+ * The interface is a measurement instrument, not a dashboard: pale plotting
+ * paper, hairline rules, tabular numerals. Two decisions drive everything:
+ *
+ * 1. Light-first, single theme. The screenshots of this UI go into the printed
+ *    thesis; a dark chassis costs ink and loses hairlines in print.
+ * 2. One accent, --signal, aliased by the operating mode (data-mode on <html>).
+ *    Simulation is indigo (modeled, discrete-event), emulation is amber (real
+ *    traffic, wall-clock bound). Switching modes re-lights the whole panel,
+ *    which is the thesis's central distinction made visible.
+ */
+
+:root {
+  --radius: 0.1875rem;
+
+  /* Ground and ink */
+  --paper: oklch(0.972 0.004 250);
+  --panel: oklch(1 0 0);
+  --ink: oklch(0.245 0.022 258);
+  --ink-soft: oklch(0.512 0.018 258);
+  --rule: oklch(0.886 0.008 255);
+  --rule-strong: oklch(0.79 0.012 255);
+  --grid: oklch(0.905 0.012 255);
+  --sunk: oklch(0.955 0.006 252);
+
+  /* Mode accents */
+  --sim: oklch(0.48 0.17 265);
+  --emu: oklch(0.55 0.16 48);
+  --signal: var(--sim);
+  --signal-soft: color-mix(in oklab, var(--signal) 10%, var(--panel));
+  --signal-edge: color-mix(in oklab, var(--signal) 35%, var(--rule));
+
+  /* States */
+  --ok: oklch(0.52 0.11 165);
+  --alert: oklch(0.55 0.19 27);
+
+  /* shadcn contract, remapped onto the instrument palette */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--panel);
+  --card-foreground: var(--ink);
+  --popover: var(--panel);
+  --popover-foreground: var(--ink);
+  --primary: var(--signal);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: var(--sunk);
+  --secondary-foreground: var(--ink);
+  --muted: var(--sunk);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--signal-soft);
+  --accent-foreground: var(--signal);
+  --destructive: var(--alert);
+  --border: var(--rule);
+  --input: var(--rule-strong);
+  --ring: var(--signal);
+
+  /* Charts: one hue per measured quantity, held at equal lightness so no
+     series reads as louder than another. Throughput takes the mode accent. */
+  --chart-1: var(--signal);
+  --chart-2: oklch(0.55 0.09 212);
+  --chart-3: oklch(0.55 0.17 27);
+  --chart-4: oklch(0.5 0.11 305);
+  --chart-5: oklch(0.55 0.17 27);
+
+  /* Devices: one hue per device profile in the network animation. Held away
+     from --signal, which is reserved for packets in flight — a device must
+     never be mistaken for the traffic crossing it. */
+  --dev-1: oklch(0.52 0.13 200);
+  --dev-2: oklch(0.5 0.14 148);
+  --dev-3: oklch(0.55 0.15 62);
+  --dev-4: oklch(0.5 0.16 320);
+  --dev-5: oklch(0.52 0.16 18);
+  --dev-6: oklch(0.5 0.09 255);
+}
+
+/* Dark theme: the instrument moved from paper to a backlit panel. Same two
+   accents, lifted in lightness so they carry on a dark ground; charts too. */
+[data-theme="dark"] {
+  --paper: oklch(0.192 0.015 260);
+  --panel: oklch(0.232 0.017 260);
+  --ink: oklch(0.94 0.006 250);
+  --ink-soft: oklch(0.68 0.014 255);
+  --rule: oklch(0.32 0.016 260);
+  --rule-strong: oklch(0.42 0.02 260);
+  --grid: oklch(0.28 0.014 260);
+  --sunk: oklch(0.262 0.017 260);
+
+  --sim: oklch(0.7 0.15 264);
+  --emu: oklch(0.76 0.14 62);
+  --ok: oklch(0.74 0.13 165);
+  --alert: oklch(0.7 0.18 25);
+  --primary-foreground: oklch(0.17 0.01 260);
+
+  --chart-2: oklch(0.72 0.1 205);
+  --chart-3: oklch(0.7 0.16 25);
+  --chart-4: oklch(0.72 0.12 300);
+  --chart-5: oklch(0.7 0.16 25);
+
+  --dev-1: oklch(0.74 0.11 200);
+  --dev-2: oklch(0.74 0.12 150);
+  --dev-3: oklch(0.78 0.13 65);
+  --dev-4: oklch(0.72 0.13 320);
+  --dev-5: oklch(0.72 0.14 20);
+  --dev-6: oklch(0.72 0.08 255);
+}
+
+/* Any subtree can re-declare which mode lights it: the control panel follows
+   the mode about to run, the readout follows the mode of the run it shows. */
+[data-mode="simulation"] {
+  --signal: var(--sim);
+}
+
+[data-mode="emulation"] {
+  --signal: var(--emu);
+}
+
+@theme inline {
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 1px);
+  --radius-xl: calc(var(--radius) + 2px);
+
+  --font-display: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-sunk: var(--sunk);
+  --color-signal: var(--signal);
+  --color-signal-soft: var(--signal-soft);
+  --color-signal-edge: var(--signal-edge);
+  --color-sim: var(--sim);
+  --color-emu: var(--emu);
+  --color-ok: var(--ok);
+  --color-alert: var(--alert);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/60;
+  }
+
+  body {
+    @apply bg-paper text-ink;
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Numbers are read in columns here; never let them dance. */
+  code,
+  kbd,
+  samp,
+  pre,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Faint plotting grid, faded out downward — the ground the readings sit on.
+     It lives on a pseudo-element so the fade never touches the content. */
+  .chassis {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .chassis::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size: 13px 13px;
+    background-position: center top;
+    -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent 320px);
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent 320px);
+  }
+
+  /* Equipment nameplate: Archivo pushed to its widest, weight up, tracking in. */
+  .nameplate {
+    font-family: var(--font-display);
+    font-stretch: 125%;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+  }
+
+  /* Section labels: the same face at its narrowest, so labels and nameplate
+     read as one typographic family without repeating themselves. */
+  .eyebrow {
+    font-family: var(--font-display);
+    font-stretch: 78%;
+    font-weight: 600;
+    font-size: 0.6875rem;
+    line-height: 1;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .readout-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  /* Etched scale marks along the top edge of the readout panel. */
+  .tick-rule {
+    height: 6px;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--ink-soft) 0 1px,
+      transparent 1px 8px
+    );
+    opacity: 0.45;
+    -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0), transparent);
+    mask-image: linear-gradient(to bottom, rgb(0 0 0), transparent);
+  }
+
+  /* Sweeping activity bar for a run in progress. */
+  .activity-bar::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    width: 34%;
+    background: var(--signal);
+    animation: sweep 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(390%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+
+  /* Decorative motion off. Motion that IS the feedback stays: a spinner is
+     the only signal that a click did something, so silencing it leaves the
+     user with nothing. Opt in with data-motion="essential". */
+  *:not([data-motion="essential"]),
+  *:not([data-motion="essential"])::before,
+  *:not([data-motion="essential"])::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
