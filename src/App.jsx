@@ -75,7 +75,7 @@ export default function App() {
       <div className="mx-auto max-w-[1400px] px-4 pt-6 pb-10 sm:px-5">
         <header className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-3">
           <div className="flex items-center gap-3">
-            <img src="favicon.svg" alt="" className="size-10" />
+            <img src="favicon.svg?v=2" alt="" className="size-10" />
             <div>
               <h1 className="nameplate text-[1.875rem] leading-none">{t('app.title')}</h1>
               <p className="mt-1.5 text-[0.8125rem] leading-none text-ink-soft">{t('app.tagline')}</p>
