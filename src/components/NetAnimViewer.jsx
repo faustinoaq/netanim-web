@@ -11,7 +11,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { inferTopology, nodeAt, parseNetAnim, traceBounds } from '../lib/netanim.js'
+import { colorAt, inferTopology, nodeAt, parseNetAnim, traceBounds } from '../lib/netanim.js'
 import { useI18n } from '../i18n.jsx'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,6 +55,7 @@ const MAX_FLIGHT_S = 0.4
 // network stays readable instead of turning into a field of dots.
 const BODY_W = 22
 const BODY_H = 15
+const DEVICE_HALF_W = BODY_W / 2 + 2 // glyph footprint, for label placement
 const HIT_RADIUS = 18
 const PACKET_R = 3.4
 const PACKET_HIT_R = 9
@@ -122,8 +123,10 @@ function readTheme() {
 // A node is radio if its channel says so, or — when the trace declares no
 // channel at all, as emulation traces do — if the trace carries wireless
 // events. Otherwise a wifi emulation would draw as wired boxes.
+const RADIO = /wifi|wireless|yans|spectrum|lr-?wpan|lte|uan|wave/i
 const isWireless = (node, trace) =>
-  /wifi|wireless|yans|spectrum/i.test(node.channel || '') || (!node.channel && !!trace?.wireless)
+  (node.channels?.length ? node.channels : [node.channel || '']).some((c) => RADIO.test(c)) ||
+  (!node.channel && !!trace?.wireless)
 
 const IPV4 = /^\d+\.\d+\.\d+\.\d+$/
 
@@ -232,28 +235,51 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
   }, [trace])
 
   // One colour per distinct device profile, in first-seen order so the legend
-  // and the canvas agree.
+  // and the canvas agree. A colour the trace sets itself (UpdateNodeColor)
+  // wins: the author chose it, and desktop NetAnim shows it too. Those nodes
+  // are listed in the legend by their description and colour.
   const devices = useMemo(() => {
     const map = new Map()
     if (!trace) return map
+    let palette = 0
     for (const node of trace.nodes) {
-      const key = deviceKey(node, profiles)
-      if (key && !map.has(key)) map.set(key, { index: map.size, count: 0 })
-    }
-    for (const node of trace.nodes) {
-      const entry = map.get(deviceKey(node, profiles))
-      if (entry) entry.count++
+      // The colour the node settles on at the start (the last keyframe at t0).
+      const own = colorAt(node, trace.startTime)
+      const key = own ? `${node.label || 'node'}|${own}` : deviceKey(node, profiles)
+      if (!key) continue
+      if (!map.has(key)) {
+        map.set(key, {
+          name: own ? node.label || own : key,
+          color: own ?? theme.devices[palette++ % theme.devices.length],
+          count: 0,
+        })
+      }
+      map.get(key).count++
     }
     return map
-  }, [trace, profiles])
+  }, [trace, profiles, theme])
 
   const colorOf = useCallback(
-    (node) => {
-      const entry = devices.get(deviceKey(node, profiles))
-      return entry ? theme.devices[entry.index % theme.devices.length] : theme.ink
+    (node, t) => {
+      const own = colorAt(node, t ?? clockRef.current)
+      if (own) return own
+      return devices.get(deviceKey(node, profiles))?.color ?? theme.ink
     },
     [devices, profiles, theme],
   )
+
+  // Examples often give many nodes the same description ("STA" for every
+  // station). On the canvas the index is added so each one can be told apart.
+  const displayName = useMemo(() => {
+    const map = new Map()
+    if (!trace) return map
+    const seen = new Map()
+    for (const node of trace.nodes) if (node.label) seen.set(node.label, (seen.get(node.label) ?? 0) + 1)
+    for (const node of trace.nodes) {
+      map.set(node.id, !node.label ? `n${node.id}` : seen.get(node.label) > 1 ? `${node.label} n${node.id}` : node.label)
+    }
+    return map
+  }, [trace])
 
   const span = trace ? trace.endTime - trace.startTime : 0
   const flightFloor = trace
@@ -402,16 +428,58 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
     for (const node of trace.nodes) {
       const [x, y] = pos.get(node.id)
       const isHub = topology?.hub === node.id
-      drawDevice(ctx, x, y, node, theme, colorOf(node), hoveredNodeId === node.id, transmitting.has(node.id), trace, isHub)
-      if (showLabels || hoveredNodeId === node.id) {
-        ctx.fillStyle = theme.ink
-        ctx.font = '600 11px ui-monospace, monospace'
-        ctx.fillText(node.label || `n${node.id}`, x, y + BODY_H / 2 + 15)
+      drawDevice(ctx, x, y, node, theme, colorOf(node, now), hoveredNodeId === node.id, transmitting.has(node.id), trace, isHub)
+    }
+    // Labels after every device, and only where they fit: nodes that sit close
+    // together (a station grid, a crowd around an access point) would print
+    // their names on top of each other. Each label claims its box; one that
+    // would overlap a box already taken drops its address first, then itself,
+    // and is still shown on hover. The hovered node is placed first so it
+    // always wins.
+    const taken = []
+    const overlaps = (r) => taken.some((o) => r.x0 < o.x1 && r.x1 > o.x0 && r.y0 < o.y1 && r.y1 > o.y0)
+    for (const node of trace.nodes) {
+      const [x, y] = pos.get(node.id)
+      taken.push({ x0: x - DEVICE_HALF_W, x1: x + DEVICE_HALF_W, y0: y - BODY_H / 2 - 8, y1: y + BODY_H / 2 })
+    }
+    const order = [...trace.nodes].sort((a, b) => (b.id === hoveredNodeId) - (a.id === hoveredNodeId))
+    for (const node of order) {
+      const hovered = hoveredNodeId === node.id
+      if (!showLabels && !hovered) continue
+      const [x, y] = pos.get(node.id)
+      const name = displayName.get(node.id) ?? `n${node.id}`
+      ctx.font = '600 11px ui-monospace, monospace'
+      const nameW = ctx.measureText(name).width
+      const addr = (showAddresses || hovered) && node.addresses[0]
+      ctx.font = '10px ui-monospace, monospace'
+      const addrW = addr ? ctx.measureText(addr).width : 0
+      const top = y + BODY_H / 2 + 5
+      const nameBox = { x0: x - nameW / 2 - 2, x1: x + nameW / 2 + 2, y0: top, y1: top + 13 }
+      const fullW = Math.max(nameW, addrW)
+      const fullBox = { x0: x - fullW / 2 - 2, x1: x + fullW / 2 + 2, y0: top, y1: top + 26 }
+      let box = null
+      let withAddr = false
+      if (addr && (hovered || !overlaps(fullBox))) {
+        box = fullBox
+        withAddr = true
+      } else if (hovered || !overlaps(nameBox)) {
+        box = nameBox
       }
-      if ((showAddresses || hoveredNodeId === node.id) && node.addresses[0]) {
+      if (!box) continue
+      taken.push(box)
+      // A backing in the panel colour, so a cable or a dashed link running
+      // under the name does not strike it through.
+      ctx.globalAlpha = hovered ? 1 : 0.85
+      ctx.fillStyle = theme.panel
+      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0)
+      ctx.globalAlpha = 1
+      ctx.fillStyle = theme.ink
+      ctx.font = '600 11px ui-monospace, monospace'
+      ctx.fillText(name, x, y + BODY_H / 2 + 15)
+      if (withAddr) {
         ctx.fillStyle = theme.inkSoft
         ctx.font = '10px ui-monospace, monospace'
-        ctx.fillText(node.addresses[0], x, y + BODY_H / 2 + 28)
+        ctx.fillText(addr, x, y + BODY_H / 2 + 28)
       }
     }
 
@@ -811,10 +879,10 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
             <span key={key} className="flex items-center gap-1.5 font-mono text-[0.6875rem] text-ink-soft">
               <span
                 className="size-2.5 shrink-0 rounded-[1px]"
-                style={{ backgroundColor: theme.devices[entry.index % theme.devices.length] }}
+                style={{ backgroundColor: entry.color }}
                 aria-hidden="true"
               />
-              {key}
+              {entry.name}
               <span className="text-ink-soft/70">×{entry.count}</span>
             </span>
           ))}
@@ -835,7 +903,7 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
               — a csma run is a bus that carries a star — and naming only one of
               them is what made the label look wrong against the picture. */}
           <span className="text-ink">
-            {tr('anim.medium')}: {tr(`anim.topo.${topology.kind}`)}
+            {tr('anim.medium')}: {tr(`anim.topo.${topology.kind}`, { parts: topology.media.join(' + ') })}
             {topology.kind === 'star' && topology.hub != null
               ? ` (${tr('anim.topo.hub', { node: nodeName(topology.hub) })})`
               : ''}
@@ -903,7 +971,7 @@ const BUS_ROW_TOLERANCE = 14
 // twice — to draw the cable, and to route packets along it, which is the only
 // way the two can agree.
 function busGeometry(topo, pos) {
-  if (topo?.kind !== 'bus') return null
+  if (topo?.kind !== 'bus' && topo?.kind !== 'hybrid') return null
   const taps = topo.bus.map((id) => [id, pos.get(id)]).filter(([, p]) => p)
   if (taps.length < 2) return null
 
@@ -918,7 +986,8 @@ function busGeometry(topo, pos) {
   for (const members of rows.values()) {
     const ys = members.map(([, , y]) => y)
     const bar = {
-      y: Math.max(...ys) + BODY_H / 2 + 26,
+      // Below the name and the address, not through them.
+      y: Math.max(...ys) + BODY_H / 2 + 36,
       maxX: Math.max(...members.map(([, x]) => x)),
       minX: Math.min(...members.map(([, x]) => x)),
       taps: members.map(([, x, y]) => [x, y]),
@@ -984,7 +1053,7 @@ function drawTopology(ctx, topo, pos, theme, hoveredId, nodeCount, geom) {
   if (!topo) return
   ctx.save()
 
-  if (topo.kind === 'bus') {
+  if (topo.kind === 'bus' || topo.kind === 'hybrid') {
     const points = topo.bus.map((id) => pos.get(id)).filter(Boolean)
     if (geom) {
       const { bars, riserX } = geom
@@ -1013,8 +1082,10 @@ function drawTopology(ctx, topo, pos, theme, hoveredId, nodeCount, geom) {
         }
       }
     }
-    ctx.restore()
-    return
+    if (topo.kind === 'bus') {
+      ctx.restore()
+      return
+    }
   }
 
   // A hairball helps nobody: past a certain size the observed mesh is drawn

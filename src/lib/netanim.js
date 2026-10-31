@@ -81,6 +81,11 @@ export function parseNetAnim(xmlText) {
           addresses: [],
           mac: null,
           channel: null,
+          // Every channel class the node has a device on: an access point sits
+          // on a Wi-Fi channel and a CSMA one at the same time.
+          channels: [],
+          // AnimationInterface::UpdateNodeColor keyframes, honoured as given.
+          colors: [],
         })
       }
     } else if (tag === 'nonp2plinkproperties') {
@@ -91,7 +96,10 @@ export function parseNetAnim(xmlText) {
       if (node && ip && ip !== '127.0.0.1') {
         if (!node.addresses.includes(ip)) node.addresses.push(ip)
         if (mac && mac !== '00:00:00:00:00:00') node.mac = mac
-        if (el.channelType && el.channelType !== 'Unknown channel') node.channel = el.channelType
+        if (el.channelType && el.channelType !== 'Unknown channel') {
+          if (!node.channel) node.channel = el.channelType
+          if (!node.channels.includes(el.channelType)) node.channels.push(el.channelType)
+        }
       }
     } else if (tag === 'link') {
       const from = num(el, 'fromId')
@@ -119,6 +127,15 @@ export function parseNetAnim(xmlText) {
         const x = num(el, 'x') ?? num(el, 'locX')
         const y = num(el, 'y') ?? num(el, 'locY')
         if (t != null && x != null && y != null) node.moves.push({ t, x, y })
+      } else if (el.p === 'c') {
+        // Node colour (AnimationInterface::UpdateNodeColor). Desktop NetAnim
+        // paints the node with it, and examples use it to tell roles apart.
+        const r = num(el, 'r')
+        const g = num(el, 'g')
+        const b = num(el, 'b')
+        if (r != null && g != null && b != null) {
+          node.colors.push({ t: num(el, 't') ?? 0, color: `rgb(${r}, ${g}, ${b})` })
+        }
       }
     } else if (tag === 'p' || tag === 'packet') {
       // Wired. lbRx is 0 in csma traces, so it cannot be trusted as the
@@ -185,7 +202,15 @@ export function parseNetAnim(xmlText) {
 
   for (const node of nodes.values()) {
     if (node.moves.length) node.moves.sort((a, b) => a.t - b.t)
+    if (node.colors.length) node.colors.sort((a, b) => a.t - b.t)
   }
+  // AnimationInterface writes a red colour for every node when it starts, so a
+  // trace where no node is ever anything but red carries no colour choice at
+  // all; honouring it would paint every device the same. Colours count only
+  // once the author has set some other one with UpdateNodeColor.
+  const DEFAULT_RED = 'rgb(255, 0, 0)'
+  const chosen = [...nodes.values()].some((node) => node.colors.some((c) => c.color !== DEFAULT_RED))
+  if (!chosen) for (const node of nodes.values()) node.colors = []
   events.sort((a, b) => a.tx - b.tx)
 
   // Nodes referenced by events but never declared (partial traces): place them
@@ -193,7 +218,7 @@ export function parseNetAnim(xmlText) {
   for (const e of events) {
     for (const id of [e.from, e.to]) {
       if (!nodes.has(id)) {
-        nodes.set(id, { id, x: id * 10, y: 0, moves: [], label: null, addresses: [], mac: null, channel: null })
+        nodes.set(id, { id, x: id * 10, y: 0, moves: [], label: null, addresses: [], mac: null, channel: null, channels: [], colors: [] })
       }
     }
   }
@@ -264,11 +289,18 @@ export function inferTopology(trace, run) {
   // like a mesh edge when the medium is really one shared bus.
   const declared = run?.scenario ?? null
   const declaredBus = declared === 'csma'
+  const onChannel = (node, re) => (node.channels?.length ? node.channels : [node.channel || '']).some((c) => re.test(c))
   const busNodes = declaredBus
     ? trace.nodes.map((node) => node.id)
-    : trace.nodes
-        .filter((node) => /csma|bus|lan|ethernet/i.test(node.channel || ''))
-        .map((node) => node.id)
+    : trace.nodes.filter((node) => onChannel(node, BUS_CHANNEL)).map((node) => node.id)
+  const radioNodes = declared
+    ? []
+    : trace.nodes.filter((node) => onChannel(node, RADIO_CHANNEL)).map((node) => node.id)
+  // A LAN behind an access point: some devices share a cable, others reach
+  // them by radio. Neither "bus" nor "mesh" alone describes it, so the cable is
+  // drawn as a bus and the radio hops as observed links on top of it.
+  const hybrid = busNodes.length >= 2 && radioNodes.length >= 2
+  const busSet = new Set(busNodes)
 
   const edges = new Map() // "a|b" (a<b) -> weight
   const bump = (a, b, w = 1) => {
@@ -278,7 +310,12 @@ export function inferTopology(trace, run) {
 
   if (wired) {
     for (const l of trace.links) bump(l.from, l.to)
-  } else if (busNodes.length < 2) {
+  }
+  if (hybrid) {
+    // Frames between two devices on the cable travel the bus; only the rest
+    // went over the air.
+    for (const e of trace.events) if (!(busSet.has(e.from) && busSet.has(e.to))) bump(e.from, e.to)
+  } else if (!wired && busNodes.length < 2) {
     for (const e of trace.events) bump(e.from, e.to)
   }
 
@@ -301,7 +338,9 @@ export function inferTopology(trace, run) {
   // links wired in a cycle. See the roadmap.
   const degrees = [...degree.values()]
   let kind = 'unknown'
-  if (busNodes.length >= 2) {
+  if (hybrid) {
+    kind = 'hybrid'
+  } else if (busNodes.length >= 2) {
     kind = 'bus'
   } else if (wired && degrees.every((d) => d <= 1)) {
     kind = 'p2p'
@@ -334,7 +373,9 @@ export function inferTopology(trace, run) {
     bus: busNodes,
     wired: wired || busNodes.length >= 2,
     // Declared links are facts; observed ones are inferred from traffic.
-    observed: !wired && busNodes.length < 2,
+    observed: hybrid || (!wired && busNodes.length < 2),
+    // What the hybrid is made of, for the caption ("CSMA + Wi-Fi").
+    media: hybrid ? mediaNames(trace) : [],
     edges: list.slice(0, MAX_TOPOLOGY_EDGES),
     edgeCount: list.length,
     maxWeight,
@@ -342,6 +383,22 @@ export function inferTopology(trace, run) {
     declared: Boolean(declared),
     traffic: trafficShape(trace, n, run),
   }
+}
+
+const BUS_CHANNEL = /csma|bus|lan|ethernet/i
+const RADIO_CHANNEL = /wifi|wireless|yans|spectrum|lr-?wpan|lte|uan|wave/i
+
+// Short names for the channel classes present, in a stable order.
+function mediaNames(trace) {
+  const all = new Set(trace.nodes.flatMap((node) => node.channels ?? []))
+  const names = []
+  const has = (re) => [...all].some((c) => re.test(c))
+  if (has(BUS_CHANNEL)) names.push('CSMA')
+  if (has(/wifi|yans/i)) names.push('Wi-Fi')
+  if (has(/lr-?wpan/i)) names.push('802.15.4')
+  if (has(/lte/i)) names.push('LTE')
+  if (trace.links.length) names.push('p2p')
+  return names
 }
 
 // Does one walk reach every node that has an edge? Tells a tree apart from a
@@ -415,6 +472,17 @@ export function nodeAt(node, t) {
     pos = m
   }
   return pos
+}
+
+// Colour of a node at time t when the trace sets one (UpdateNodeColor), else null.
+export function colorAt(node, t) {
+  if (!node.colors?.length) return null
+  let color = node.colors[0].color
+  for (const c of node.colors) {
+    if (c.t > t) break
+    color = c.color
+  }
+  return color
 }
 
 // World bounds with a margin, for fitting the trace into the canvas.

@@ -12,8 +12,12 @@ No install, no Qt, no upload: the file is parsed and animated on your machine.
   pan, fit-to-view and fullscreen.
 - Draws the links the trace declares; when it declares none (Wi-Fi, mesh), it
   draws the links it observed, dashed, so they are not mistaken for cables.
-- Colours nodes by their description (for example a device profile name) and
-  lists them in a legend.
+- Uses the node colours set with `UpdateNodeColor`; otherwise colours nodes by
+  their description (for example a device profile name). Both go in a legend.
+- Networks that mix a cable and radio (an access point in front of a CSMA
+  LAN) are drawn as a bus plus the observed radio links, and labelled as such.
+- Labels that would overlap are thinned out (address first, then name) and
+  come back on hover; nodes sharing a description get their index appended.
 - Hovering a node or a packet shows its data: addresses, sender, receivers,
   latency.
 - Spanish and English, light and dark theme.
