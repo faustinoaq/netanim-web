@@ -1,11 +1,77 @@
 import { useEffect, useState } from 'react'
-import { Bug, FileText, Moon, Sun } from 'lucide-react'
+import { Bug, FileText, Moon, Star, Sun } from 'lucide-react'
 import { useI18n } from './i18n.jsx'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import NetAnimViewer from './components/NetAnimViewer.jsx'
 
 export const REPO_URL = 'https://github.com/faustinoaq/netanim-web'
+const REPO_API = 'https://api.github.com/repos/faustinoaq/netanim-web'
+const VERSION = __APP_VERSION__
+
+// Star count from the public GitHub API. Unauthenticated calls are limited per
+// visitor IP, so the count is kept for an hour in this browser; when the API
+// cannot be reached the button simply shows no number.
+function useStars() {
+  const [stars, setStars] = useState(null)
+  useEffect(() => {
+    const KEY = 'netanim-web:stars'
+    try {
+      const cached = JSON.parse(localStorage.getItem(KEY) || 'null')
+      if (cached && Date.now() - cached.at < 3600e3) {
+        setStars(cached.n)
+        return
+      }
+    } catch {
+      // storage unavailable: just fetch
+    }
+    let alive = true
+    fetch(REPO_API)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const n = data?.stargazers_count
+        if (!alive || typeof n !== 'number') return
+        setStars(n)
+        try {
+          localStorage.setItem(KEY, JSON.stringify({ n, at: Date.now() }))
+        } catch {
+          // ignore
+        }
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  return stars
+}
+
+// GitHub's star button, drawn here instead of embedding their iframe: one
+// request to the API, no third-party frame, and it follows the page theme.
+function StarButton() {
+  const { t } = useI18n()
+  const stars = useStars()
+  return (
+    <a
+      href={REPO_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex h-8 items-stretch overflow-hidden rounded-sm border border-rule-strong text-sm font-medium text-ink hover:bg-sunk"
+      aria-label={stars != null ? t('app.starsAria', { n: stars }) : t('app.star')}
+    >
+      <span className="flex items-center gap-1.5 px-2.5">
+        <GitHubMark className="size-4" />
+        {t('app.star')}
+      </span>
+      {stars != null && (
+        <span className="flex items-center gap-1 border-l border-rule-strong px-2.5 font-mono text-xs tabular-nums">
+          <Star className="size-3.5 fill-current text-signal" aria-hidden="true" />
+          {stars}
+        </span>
+      )}
+    </a>
+  )
+}
 
 // Bundled traces, so a first-time visitor sees the viewer working before they
 // have an anim.xml of their own. Both come from ns-3 3.44 runs.
@@ -82,12 +148,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <a href={REPO_URL} target="_blank" rel="noreferrer">
-                <GitHubMark className="size-4" />
-                GitHub
-              </a>
-            </Button>
+            <StarButton />
             <LangToggle />
             <ThemeToggle />
           </div>
@@ -121,7 +182,12 @@ export default function App() {
 
         <footer className="mt-6 flex flex-wrap items-start justify-between gap-4 border-t border-rule pt-3 text-xs text-ink-soft">
           <div className="max-w-2xl space-y-1">
-            <p>{t('app.footer')}</p>
+            <p>
+              {t('app.footer')}{' '}
+              <a className="font-mono hover:text-ink" href={`${REPO_URL}/releases/tag/v${VERSION}`} target="_blank" rel="noreferrer">
+                v{VERSION}
+              </a>
+            </p>
             <p>
               {t('app.origin').split('SSBCV').map((part, i) =>
                 i === 0 ? part : (
