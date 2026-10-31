@@ -171,6 +171,11 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
   const hoverRef = useRef(null)
   const [mouse, setMouse] = useState({ x: 0, y: 0 })
   const mouseRef = useRef(null)
+  // A tapped (or clicked) node or packet keeps its card open. Touch screens
+  // have no hover, so without this the cards were unreachable on a phone.
+  const pinnedRef = useRef(null)
+  const drawnRef = useRef([])
+  const tapRef = useRef(null)
   const clockRef = useRef(0)
   // Pan/zoom live in refs: they change on every mouse move and must not make
   // React re-render 60 times a second.
@@ -204,6 +209,11 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
       return null
     }
   }, [xml])
+
+  // A pin belongs to the trace it was made on.
+  useEffect(() => {
+    pinnedRef.current = null
+  }, [trace])
 
   // A file the user opened by hand is not the run's file, so its scenario and
   // its traffic pattern are unknown again and both go back to being inferred.
@@ -523,7 +533,20 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
     // Hit testing runs here rather than on pointermove: packets move under a
     // stationary cursor, so "what am I pointing at" has to be answered every
     // frame, not only when the mouse does something.
-    const next = hitTest(mouseRef.current, pos, drawn)
+    drawnRef.current = drawn
+    let next = hitTest(mouseRef.current, pos, drawn)
+    const pinned = pinnedRef.current
+    if (!next && pinned) {
+      if (pinned.kind === 'node') {
+        next = pos.has(pinned.id) ? pinned : null
+      } else {
+        // Follow the packet while it flies; once it lands the card stays where
+        // it was last seen, so it can still be read.
+        const live = drawn.find((p) => p.e === pinned.e)
+        if (live) pinnedRef.current = { kind: 'packet', e: live.e, x: live.x, y: live.y }
+        next = pinnedRef.current
+      }
+    }
     if (next?.kind === 'packet') {
       // Ring the packet the card is describing, so the pairing is unambiguous.
       ctx.strokeStyle = theme.ink
@@ -593,6 +616,7 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
   function onPointerDown(e) {
     const rect = e.currentTarget.getBoundingClientRect()
     const point = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    tapRef.current = { x: e.clientX, y: e.clientY, point }
     // Pressing on a device moves that device; pressing on empty space pans the
     // view. Same gesture, and which one you get is decided by what is under it.
     const node = nodeUnder(point, screenRef.current)
@@ -606,8 +630,11 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
   function onPointerMove(e) {
     const rect = e.currentTarget.getBoundingClientRect()
     const point = { x: e.clientX - rect.left, y: e.clientY - rect.top }
-    mouseRef.current = point
-    setMouse(point)
+    // A finger has no hover: only a mouse or pen drives the hover card.
+    if (e.pointerType !== 'touch') {
+      mouseRef.current = point
+      setMouse(point)
+    }
     const drag = dragRef.current
     if (!drag) return
     if (drag.node != null) {
@@ -621,6 +648,21 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
   }
 
   function onPointerUp(e) {
+    // A press that barely moved is a tap: pin what is under it, or clear the
+    // pin when it lands on empty space or on what is already pinned.
+    const tap = tapRef.current
+    tapRef.current = null
+    if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < TAP_SLOP) {
+      // A fingertip is far less precise than a cursor, so packets get a wider
+      // target on touch.
+      const hit = hitTest(tap.point, screenRef.current, drawnRef.current, e.pointerType === 'touch' ? PACKET_HIT_R * 2.5 : PACKET_HIT_R)
+      pinnedRef.current = hit && !sameHover(hit, pinnedRef.current) ? hit : null
+      if (!pinnedRef.current && e.pointerType === 'touch') {
+        hoverRef.current = null
+        setHover(null)
+      }
+      draw()
+    }
     if (dragRef.current?.node != null) setMoveCount(movedRef.current.size)
     dragRef.current = null
     e.currentTarget.releasePointerCapture?.(e.pointerId)
@@ -632,11 +674,14 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
     draw()
   }
 
-  function onPointerLeave() {
+  function onPointerLeave(e) {
     dragRef.current = null
     mouseRef.current = null
-    hoverRef.current = null
-    setHover(null)
+    // Touch fires pointerleave right after every lift; the pinned card stays.
+    if (e.pointerType !== 'touch' && !pinnedRef.current) {
+      hoverRef.current = null
+      setHover(null)
+    }
   }
 
   function fitView() {
@@ -770,7 +815,7 @@ export default function NetAnimViewer({ source, label, note, profiles, scenario 
       >
         <canvas
           ref={canvasRef}
-          className="h-full w-full cursor-grab"
+          className="h-full w-full cursor-grab touch-none"
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -949,12 +994,15 @@ function nodeUnder(point, pos) {
   return null
 }
 
-function hitTest(point, pos, drawn) {
+// A press that moves less than this many pixels counts as a tap, not a drag.
+const TAP_SLOP = 8
+
+function hitTest(point, pos, drawn, packetR = PACKET_HIT_R) {
   if (!point) return null
   const id = nodeUnder(point, pos)
   if (id != null) return { kind: 'node', id }
   for (const p of drawn) {
-    if (Math.hypot(p.x - point.x, p.y - point.y) <= PACKET_HIT_R) {
+    if (Math.hypot(p.x - point.x, p.y - point.y) <= packetR) {
       return { kind: 'packet', e: p.e, x: p.x, y: p.y }
     }
   }

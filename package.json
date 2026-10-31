@@ -1,7 +1,7 @@
 {
   "name": "netanim-web",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Play ns-3 NetAnim traces (anim.xml) in the browser",
   "license": "MIT",
   "type": "module",
