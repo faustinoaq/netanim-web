@@ -122,7 +122,16 @@ export default function App() {
         <footer className="mt-6 flex flex-wrap items-start justify-between gap-4 border-t border-rule pt-3 text-xs text-ink-soft">
           <div className="max-w-2xl space-y-1">
             <p>{t('app.footer')}</p>
-            <p>{t('app.origin')}</p>
+            <p>
+              {t('app.origin').split('SSBCV').map((part, i) =>
+                i === 0 ? part : (
+                  <span key={i}>
+                    <a className="underline underline-offset-2 hover:text-ink" href="https://github.com/faustinoaq/ssbcv" target="_blank" rel="noreferrer">SSBCV</a>
+                    {part}
+                  </span>
+                ),
+              )}
+            </p>
           </div>
           <div className="flex flex-wrap gap-4">
             <a className="inline-flex items-center gap-1.5 hover:text-ink" href={REPO_URL} target="_blank" rel="noreferrer">
